@@ -1,0 +1,35 @@
+{
+  "name": "@deepcrawl/mcp-workspace",
+  "version": "1.0.0",
+  "description": "MCP server for workspace filesystem and shell execution",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-workspace": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/index.ts --http",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:http": "node dist/index.js --http",
+    "tunnel": "bash scripts/tunnel.sh",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
+    "execa": "^9.0.0",
+    "glob": "^10.5.0",
+    "diff": "^5.1.0",
+    "zod": "catalog:",
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "^4.7.0",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

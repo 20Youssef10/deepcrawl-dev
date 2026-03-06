@@ -9,5 +9,9 @@
   },
   "vars": {
     "DEEPCRAWL_API_URL": "https://deepcrawl-worker-v0-production.shinzero.workers.dev"
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "public"
   }
 }
