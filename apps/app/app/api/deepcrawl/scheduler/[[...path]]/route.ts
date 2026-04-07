@@ -8,11 +8,12 @@ const DEEPCRAWL_BASE_URL = process.env.NEXT_PUBLIC_DEEPCRAWL_API_URL as string;
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> },
+  { params }: { params: Promise<{ path?: string[] }> },
 ) {
   const { path } = await params;
   const searchParams = request.nextUrl.searchParams.toString();
-  const fullPath = `/scheduler/${path.join('/')}${searchParams ? `?${searchParams}` : ''}`;
+  const pathPart = path ? path.join('/') : '';
+  const fullPath = `/scheduler/${pathPart}${searchParams ? `?${searchParams}` : ''}`;
 
   const requestHeaders = await headers();
   const authHeaders = buildDeepcrawlHeaders(requestHeaders);
@@ -30,11 +31,12 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> },
+  { params }: { params: Promise<{ path?: string[] }> },
 ) {
   const { path } = await params;
   const body = await request.json();
-  const fullPath = `/scheduler/${path.join('/')}`;
+  const pathPart = path ? path.join('/') : '';
+  const fullPath = `/scheduler/${pathPart}`;
 
   const requestHeaders = await headers();
   const authHeaders = buildDeepcrawlHeaders(requestHeaders);
@@ -54,11 +56,12 @@ export async function POST(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> },
+  { params }: { params: Promise<{ path?: string[] }> },
 ) {
   const { path } = await params;
   const body = await request.json();
-  const fullPath = `/scheduler/${path.join('/')}`;
+  const pathPart = path ? path.join('/') : '';
+  const fullPath = `/scheduler/${pathPart}`;
 
   const requestHeaders = await headers();
   const authHeaders = buildDeepcrawlHeaders(requestHeaders);
@@ -78,10 +81,11 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> },
+  { params }: { params: Promise<{ path?: string[] }> },
 ) {
   const { path } = await params;
-  const fullPath = `/scheduler/${path.join('/')}`;
+  const pathPart = path ? path.join('/') : '';
+  const fullPath = `/scheduler/${pathPart}`;
 
   const requestHeaders = await headers();
   const authHeaders = buildDeepcrawlHeaders(requestHeaders);
