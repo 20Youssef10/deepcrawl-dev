@@ -8,6 +8,16 @@ import { extractLinksTool } from './tools/links';
 import { listLogsTool } from './tools/logs';
 import { pdfExtractTool } from './tools/pdf';
 import { getMarkdownTool, readUrlTool } from './tools/read';
+import {
+  createScheduledJobTool,
+  deleteScheduledJobTool,
+  getJobRunsTool,
+  getJobSnapshotsTool,
+  getScheduledJobTool,
+  listScheduledJobsTool,
+  triggerScheduledJobTool,
+  updateScheduledJobTool,
+} from './tools/scheduler';
 import { screenshotTool } from './tools/screenshot';
 
 function createServer(apiUrl: string, apiKey: string) {
@@ -206,6 +216,152 @@ function createServer(apiUrl: string, apiKey: string) {
         parallel,
         maxConcurrency,
       });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  // Scheduler tools
+  server.tool(
+    'create_scheduled_job',
+    'Create a scheduled/recurring web crawling job with change detection',
+    {
+      name: z.string(),
+      url: z.string().url(),
+      operation: z
+        .enum(['read', 'markdown', 'extract', 'links'])
+        .default('read'),
+      scheduleType: z
+        .enum(['interval', 'cron', 'daily', 'weekly', 'manual'])
+        .default('interval'),
+      scheduleValue: z.string().default('60'),
+      timezone: z.string().default('UTC'),
+      description: z.string().optional(),
+      enableChangeDetection: z.boolean().default(true),
+      changeDetectionMode: z
+        .enum(['content_hash', 'diff', 'metadata'])
+        .default('content_hash'),
+      diffThreshold: z.number().min(0).max(100).optional(),
+      notifyOnChange: z.boolean().default(false),
+      notifyOnError: z.boolean().default(false),
+      webhookUrl: z.string().url().optional(),
+      notificationChannels: z.array(z.string()).optional(),
+    },
+    async (input) => {
+      const result = await createScheduledJobTool(apiUrl, apiKey, input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'list_scheduled_jobs',
+    'List all scheduled jobs',
+    {
+      limit: z.number().optional(),
+      offset: z.number().optional(),
+      isActive: z.boolean().optional(),
+    },
+    async (input) => {
+      const result = await listScheduledJobsTool(apiUrl, apiKey, input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'get_scheduled_job',
+    'Get details of a specific scheduled job',
+    {
+      jobId: z.string(),
+    },
+    async ({ jobId }) => {
+      const result = await getScheduledJobTool(apiUrl, apiKey, jobId);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'update_scheduled_job',
+    'Update a scheduled job',
+    {
+      jobId: z.string(),
+      name: z.string().optional(),
+      url: z.string().url().optional(),
+      isActive: z.boolean().optional(),
+      scheduleType: z
+        .enum(['interval', 'cron', 'daily', 'weekly', 'manual'])
+        .optional(),
+      scheduleValue: z.string().optional(),
+      webhookUrl: z.string().url().optional(),
+      enableChangeDetection: z.boolean().optional(),
+    },
+    async ({ jobId, ...input }) => {
+      const result = await updateScheduledJobTool(apiUrl, apiKey, jobId, input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'delete_scheduled_job',
+    'Delete a scheduled job',
+    {
+      jobId: z.string(),
+    },
+    async ({ jobId }) => {
+      const result = await deleteScheduledJobTool(apiUrl, apiKey, jobId);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'trigger_scheduled_job',
+    'Manually trigger a scheduled job to run immediately',
+    {
+      jobId: z.string(),
+    },
+    async ({ jobId }) => {
+      const result = await triggerScheduledJobTool(apiUrl, apiKey, jobId);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'get_job_runs',
+    'Get the run history of a scheduled job',
+    {
+      jobId: z.string(),
+      limit: z.number().optional(),
+      offset: z.number().optional(),
+    },
+    async ({ jobId, limit, offset }) => {
+      const result = await getJobRunsTool(apiUrl, apiKey, jobId, limit, offset);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'get_job_snapshots',
+    'Get the content snapshots of a scheduled job',
+    {
+      jobId: z.string(),
+      limit: z.number().optional(),
+    },
+    async ({ jobId, limit }) => {
+      const result = await getJobSnapshotsTool(apiUrl, apiKey, jobId, limit);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };

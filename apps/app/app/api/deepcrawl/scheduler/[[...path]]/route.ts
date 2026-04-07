@@ -1,0 +1,96 @@
+'use server';
+
+import { headers } from 'next/headers';
+import { type NextRequest, NextResponse } from 'next/server';
+import { buildDeepcrawlHeaders } from '@/lib/auth-mode';
+
+const DEEPCRAWL_BASE_URL = process.env.NEXT_PUBLIC_DEEPCRAWL_API_URL as string;
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+) {
+  const { path } = await params;
+  const searchParams = request.nextUrl.searchParams.toString();
+  const fullPath = `/scheduler/${path.join('/')}${searchParams ? `?${searchParams}` : ''}`;
+
+  const requestHeaders = await headers();
+  const authHeaders = buildDeepcrawlHeaders(requestHeaders);
+
+  const response = await fetch(`${DEEPCRAWL_BASE_URL}${fullPath}`, {
+    method: 'GET',
+    headers: {
+      ...authHeaders,
+    },
+  });
+
+  const data = await response.json();
+  return NextResponse.json(data, { status: response.status });
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+) {
+  const { path } = await params;
+  const body = await request.json();
+  const fullPath = `/scheduler/${path.join('/')}`;
+
+  const requestHeaders = await headers();
+  const authHeaders = buildDeepcrawlHeaders(requestHeaders);
+
+  const response = await fetch(`${DEEPCRAWL_BASE_URL}${fullPath}`, {
+    method: 'POST',
+    headers: {
+      ...authHeaders,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json();
+  return NextResponse.json(data, { status: response.status });
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+) {
+  const { path } = await params;
+  const body = await request.json();
+  const fullPath = `/scheduler/${path.join('/')}`;
+
+  const requestHeaders = await headers();
+  const authHeaders = buildDeepcrawlHeaders(requestHeaders);
+
+  const response = await fetch(`${DEEPCRAWL_BASE_URL}${fullPath}`, {
+    method: 'PATCH',
+    headers: {
+      ...authHeaders,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json();
+  return NextResponse.json(data, { status: response.status });
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> },
+) {
+  const { path } = await params;
+  const fullPath = `/scheduler/${path.join('/')}`;
+
+  const requestHeaders = await headers();
+  const authHeaders = buildDeepcrawlHeaders(requestHeaders);
+
+  const response = await fetch(`${DEEPCRAWL_BASE_URL}${fullPath}`, {
+    method: 'DELETE',
+    headers: authHeaders,
+  });
+
+  const data = await response.json();
+  return NextResponse.json(data, { status: response.status });
+}

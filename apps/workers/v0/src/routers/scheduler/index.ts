@@ -1,34 +1,27 @@
-import type {
-  CreateScheduledJobInput,
-  GetJobSnapshotsInput,
-  ListJobRunsInput,
-  ListScheduledJobsInput,
-  UpdateScheduledJobInput,
-} from '@deepcrawl/types/routers/scheduler/types';
 import { Hono } from 'hono';
-import { getCookie } from 'hono/cookie';
-import { cors } from 'hono/cors';
-import { z } from 'zod';
-import type { ORPCContext } from '@/lib/context';
+import type { AppBindings, AppVariables, ORPCContext } from '@/lib/context';
+import { createContext } from '@/lib/context';
+import { processBatchRequest } from '@/routers/batch/batch.processor';
 
-const scheduler = new Hono<{ Bindings: Env }>();
+type SchedulerEnv = AppBindings;
+
+const scheduler = new Hono<SchedulerEnv>();
+
+// Helper to create proper ORPCContext from Hono context
+async function createSchedulerContext(c: any): Promise<ORPCContext> {
+  return await createContext({ context: c });
+}
 
 // Helper to parse cron expression
 function parseCronToNextRun(cronExpression: string, timezone = 'UTC'): Date {
-  // Simplified cron parser - for production use a library like cron-parser
   const parts = cronExpression.split(' ');
   if (parts.length < 5) {
-    // Fallback to interval (minutes)
     const minutes = Number.parseInt(cronExpression, 10) || 60;
     return new Date(Date.now() + minutes * 60 * 1000);
   }
-
-  // For now, return a default next run time
-  // In production, implement proper cron parsing
-  return new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  return new Date(Date.now() + 60 * 60 * 1000);
 }
 
-// Helper to calculate next run based on schedule
 function calculateNextRun(
   scheduleType: string,
   scheduleValue: string,
@@ -76,13 +69,22 @@ function calculateNextRun(
   }
 }
 
-// Change detection logic
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(36);
+}
+
 function detectChanges(
   oldContent: string | null,
   newContent: string,
   mode: string,
   threshold: number,
-): { hasChanged: boolean; diffPercentage: number; changeType: string } {
+) {
   if (!oldContent) {
     return { hasChanged: true, diffPercentage: 100, changeType: 'content' };
   }
@@ -99,91 +101,112 @@ function detectChanges(
   }
 
   if (mode === 'diff') {
-    // Simple diff calculation
     const oldWords = oldContent.split(/\s+/);
     const newWords = newContent.split(/\s+/);
-
     const added = newWords.filter((w) => !oldWords.includes(w)).length;
     const removed = oldWords.filter((w) => !newWords.includes(w)).length;
     const totalWords = Math.max(oldWords.length, newWords.length);
-
     const diffPercentage =
       totalWords > 0 ? Math.round(((added + removed) / totalWords) * 100) : 0;
-
     return {
       hasChanged: diffPercentage >= threshold,
       diffPercentage,
-      changeType: added > removed ? 'content' : 'content',
+      changeType: 'content',
     };
   }
 
   return { hasChanged: false, diffPercentage: 0, changeType: 'none' };
 }
 
-// Simple hash function
-function simpleHash(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(36);
-}
-
 // Create scheduled job
 scheduler.post('/jobs', async (c) => {
   const body = await c.req.json();
-  const validated = CreateScheduledJobSchema.parse(body);
 
   const id = crypto.randomUUID();
-  const userId = 'default-user'; // TODO: Get from auth
+  const userId = 'default-user';
   const nextRunAt = calculateNextRun(
-    validated.scheduleType,
-    validated.scheduleValue,
-    validated.timezone,
+    body.scheduleType,
+    body.scheduleValue,
+    body.timezone,
   );
   const now = new Date().toISOString();
 
   const job = {
     id,
-    userId,
-    name: validated.name,
-    description: validated.description || null,
-    url: validated.url,
-    operation: validated.operation,
-    options: validated.options || {},
-    scheduleType: validated.scheduleType,
-    scheduleValue: validated.scheduleValue,
-    timezone: validated.timezone,
-    enableChangeDetection: validated.enableChangeDetection ?? true,
-    changeDetectionMode: validated.changeDetectionMode || 'content_hash',
-    diffThreshold: validated.diffThreshold || null,
-    notifyOnChange: validated.notifyOnChange ?? true,
-    notifyOnError: validated.notifyOnError ?? true,
-    webhookUrl: validated.webhookUrl || null,
-    notificationChannels: validated.notificationChannels || ['webhook'],
-    isActive: true,
-    lastRunAt: null,
-    nextRunAt: nextRunAt.toISOString(),
-    runCount: 0,
-    errorCount: 0,
-    createdAt: now,
-    updatedAt: now,
+    user_id: userId,
+    name: body.name,
+    description: body.description || null,
+    url: body.url,
+    operation: body.operation,
+    options: JSON.stringify(body.options || {}),
+    schedule_type: body.scheduleType,
+    schedule_value: body.scheduleValue,
+    timezone: body.timezone || 'UTC',
+    enable_change_detection: body.enableChangeDetection ? 1 : 0,
+    change_detection_mode: body.changeDetectionMode || 'content_hash',
+    diff_threshold: body.diffThreshold ?? null,
+    notify_on_change: body.notifyOnChange ? 1 : 0,
+    notify_on_error: body.notifyOnError ? 1 : 0,
+    webhook_url: body.webhookUrl || null,
+    notification_channels: JSON.stringify(
+      body.notificationChannels || ['webhook'],
+    ),
+    is_active: 1,
+    last_run_at: null,
+    next_run_at: nextRunAt.toISOString(),
+    run_count: 0,
+    error_count: 0,
   };
 
-  // Store in KV (for now, use in-memory or KV)
-  const kvKey = `scheduler:job:${id}`;
-  await c.env.KV.put(kvKey, JSON.stringify(job));
+  // Insert into D1
+  try {
+    const now = new Date().toISOString();
+    await c.env.DB_V0.prepare(`
+      INSERT INTO scheduled_jobs (
+        id, user_id, name, description, url, operation, options,
+        schedule_type, schedule_value, timezone,
+        enable_change_detection, change_detection_mode, diff_threshold,
+        notify_on_change, notify_on_error, webhook_url, notification_channels,
+        is_active, last_run_at, next_run_at, run_count, error_count,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+      .bind(
+        job.id,
+        job.user_id,
+        job.name,
+        job.description || null,
+        job.url,
+        job.operation,
+        job.options,
+        job.schedule_type,
+        job.schedule_value,
+        job.timezone,
+        job.enable_change_detection,
+        job.change_detection_mode,
+        job.diff_threshold,
+        job.notify_on_change,
+        job.notify_on_error,
+        job.webhook_url || null,
+        job.notification_channels,
+        job.is_active,
+        null,
+        job.next_run_at,
+        job.run_count,
+        job.error_count,
+        now,
+        now,
+      )
+      .run();
+  } catch (e) {
+    console.error('DB Error creating job:', e);
+    return c.json({ success: false, error: `Failed to create job: ${e}` }, 500);
+  }
 
-  // Add to schedule queue
-  const queueKey = `scheduler:queue:${nextRunAt.getTime()}`;
-  const existing = await c.env.KV.get(queueKey);
-  const queue = existing ? JSON.parse(existing) : [];
-  queue.push({ jobId: id, scheduledFor: nextRunAt.toISOString() });
-  await c.env.KV.put(queueKey, JSON.stringify(queue));
-
-  return c.json({ success: true, data: job });
+  return c.json({
+    success: true,
+    data: { ...job, enableChangeDetection: true },
+  });
 });
 
 // List scheduled jobs
@@ -192,249 +215,378 @@ scheduler.get('/jobs', async (c) => {
   const offset = Number.parseInt(c.req.query('offset') || '0');
   const isActive = c.req.query('isActive');
 
-  // Get all jobs from KV
-  const list = await c.env.KV.list({ prefix: 'scheduler:job:' });
-  let jobs = await Promise.all(
-    list.keys.map(async (key) => {
-      const data = await c.env.KV.get(key.name);
-      return data ? JSON.parse(data) : null;
-    }),
-  );
-
-  jobs = jobs.filter(Boolean);
+  let query = 'SELECT * FROM scheduled_jobs';
+  const params: any[] = [];
 
   if (isActive !== undefined) {
-    const activeFilter = isActive === 'true';
-    jobs = jobs.filter((j: any) => j.isActive === activeFilter);
+    query += ' WHERE is_active = ?';
+    params.push(isActive === 'true' ? 1 : 0);
   }
 
-  jobs.sort(
-    (a: any, b: any) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+  query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+  params.push(limit, offset);
 
-  return c.json({
-    success: true,
-    data: jobs.slice(offset, offset + limit),
-    meta: {
-      total: jobs.length,
-      limit,
-      offset,
-    },
-  });
+  try {
+    const { results } = await c.env.DB_V0.prepare(query)
+      .bind(...params)
+      .all();
+
+    const countQuery =
+      isActive !== undefined
+        ? 'SELECT COUNT(*) as total FROM scheduled_jobs WHERE is_active = ?'
+        : 'SELECT COUNT(*) as total FROM scheduled_jobs';
+    const countParams =
+      isActive !== undefined ? [isActive === 'true' ? 1 : 0] : [];
+    const { results: countResults } = await c.env.DB_V0.prepare(countQuery)
+      .bind(...countParams)
+      .all();
+
+    const jobs = (results || []).map((row: any) => ({
+      id: row.id,
+      userId: row.user_id,
+      name: row.name,
+      description: row.description,
+      url: row.url,
+      operation: row.operation,
+      options: JSON.parse(row.options || '{}'),
+      scheduleType: row.schedule_type,
+      scheduleValue: row.schedule_value,
+      timezone: row.timezone,
+      enableChangeDetection: row.enable_change_detection === 1,
+      changeDetectionMode: row.change_detection_mode,
+      diffThreshold: row.diff_threshold,
+      notifyOnChange: row.notify_on_change === 1,
+      notifyOnError: row.notify_on_error === 1,
+      webhookUrl: row.webhook_url,
+      notificationChannels: JSON.parse(row.notification_channels || '[]'),
+      isActive: row.is_active === 1,
+      lastRunAt: row.last_run_at,
+      nextRunAt: row.next_run_at,
+      runCount: row.run_count,
+      errorCount: row.error_count,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+
+    return c.json({
+      success: true,
+      data: jobs,
+      meta: { total: countResults[0]?.total || 0, limit, offset },
+    });
+  } catch (e) {
+    console.error('DB Error:', e);
+    return c.json({ success: false, error: 'Failed to list jobs' }, 500);
+  }
 });
 
 // Get single job
 scheduler.get('/jobs/:id', async (c) => {
   const id = c.req.param('id');
-  const jobKey = `scheduler:job:${id}`;
-  const job = await c.env.KV.get(jobKey);
 
-  if (!job) {
-    return c.json({ success: false, error: 'Job not found' }, 404);
+  try {
+    const { results } = await c.env.DB_V0.prepare(
+      'SELECT * FROM scheduled_jobs WHERE id = ?',
+    )
+      .bind(id)
+      .all();
+
+    if (!results || results.length === 0) {
+      return c.json({ success: false, error: 'Job not found' }, 404);
+    }
+
+    const row: any = results[0];
+    const job = {
+      id: row.id,
+      userId: row.user_id,
+      name: row.name,
+      description: row.description,
+      url: row.url,
+      operation: row.operation,
+      options: JSON.parse(row.options || '{}'),
+      scheduleType: row.schedule_type,
+      scheduleValue: row.schedule_value,
+      timezone: row.timezone,
+      enableChangeDetection: row.enable_change_detection === 1,
+      changeDetectionMode: row.change_detection_mode,
+      diffThreshold: row.diff_threshold,
+      notifyOnChange: row.notify_on_change === 1,
+      notifyOnError: row.notify_on_error === 1,
+      webhookUrl: row.webhook_url,
+      notificationChannels: JSON.parse(row.notification_channels || '[]'),
+      isActive: row.is_active === 1,
+      lastRunAt: row.last_run_at,
+      nextRunAt: row.next_run_at,
+      runCount: row.run_count,
+      errorCount: row.error_count,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+
+    return c.json({ success: true, data: job });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to get job' }, 500);
   }
-
-  return c.json({ success: true, data: JSON.parse(job) });
 });
 
 // Update scheduled job
 scheduler.patch('/jobs/:id', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
-  const validated = UpdateScheduledJobSchema.parse(body);
+  const now = new Date().toISOString();
 
-  const jobKey = `scheduler:job:${id}`;
-  const existing = await c.env.KV.get(jobKey);
+  // Build update query dynamically
+  const updates: string[] = ['updated_at = ?'];
+  const params: any[] = [now];
 
-  if (!existing) {
-    return c.json({ success: false, error: 'Job not found' }, 404);
+  if (body.name !== undefined) {
+    updates.push('name = ?');
+    params.push(body.name);
   }
-
-  const job = JSON.parse(existing);
-  const updated = {
-    ...job,
-    ...validated,
-    updatedAt: new Date().toISOString(),
-  };
+  if (body.description !== undefined) {
+    updates.push('description = ?');
+    params.push(body.description);
+  }
+  if (body.url !== undefined) {
+    updates.push('url = ?');
+    params.push(body.url);
+  }
+  if (body.isActive !== undefined) {
+    updates.push('is_active = ?');
+    params.push(body.isActive ? 1 : 0);
+  }
+  if (body.scheduleType !== undefined) {
+    updates.push('schedule_type = ?');
+    params.push(body.scheduleType);
+  }
+  if (body.scheduleValue !== undefined) {
+    updates.push('schedule_value = ?');
+    params.push(body.scheduleValue);
+  }
+  if (body.webhookUrl !== undefined) {
+    updates.push('webhook_url = ?');
+    params.push(body.webhookUrl);
+  }
+  if (body.enableChangeDetection !== undefined) {
+    updates.push('enable_change_detection = ?');
+    params.push(body.enableChangeDetection ? 1 : 0);
+  }
 
   // Recalculate next run if schedule changed
-  if (validated.scheduleType || validated.scheduleValue) {
-    updated.nextRunAt = calculateNextRun(
-      updated.scheduleType,
-      updated.scheduleValue,
-      updated.timezone,
-    ).toISOString();
+  if (body.scheduleType || body.scheduleValue) {
+    const { results } = await c.env.DB_V0.prepare(
+      'SELECT schedule_type, schedule_value, timezone FROM scheduled_jobs WHERE id = ?',
+    )
+      .bind(id)
+      .all();
+    if (results && results[0]) {
+      const job: any = results[0];
+      const newType = body.scheduleType || job.schedule_type;
+      const newValue = body.scheduleValue || job.schedule_value;
+      const nextRun = calculateNextRun(newType, newValue, job.timezone);
+      updates.push('next_run_at = ?');
+      params.push(nextRun.toISOString());
+    }
   }
 
-  await c.env.KV.put(jobKey, JSON.stringify(updated));
+  params.push(id);
 
-  return c.json({ success: true, data: updated });
+  try {
+    await c.env.DB_V0.prepare(
+      `UPDATE scheduled_jobs SET ${updates.join(', ')} WHERE id = ?`,
+    )
+      .bind(...params)
+      .run();
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to update job' }, 500);
+  }
 });
 
 // Delete scheduled job
 scheduler.delete('/jobs/:id', async (c) => {
   const id = c.req.param('id');
-  const jobKey = `scheduler:job:${id}`;
 
-  await c.env.KV.delete(jobKey);
-
-  return c.json({ success: true });
+  try {
+    await c.env.DB_V0.prepare('DELETE FROM scheduled_jobs WHERE id = ?')
+      .bind(id)
+      .run();
+    return c.json({ success: true });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to delete job' }, 500);
+  }
 });
 
 // Trigger job manually
 scheduler.post('/jobs/:id/trigger', async (c) => {
   const id = c.req.param('id');
-  const jobKey = `scheduler:job:${id}`;
-  const job = await c.env.KV.get(jobKey);
-
-  if (!job) {
-    return c.json({ success: false, error: 'Job not found' }, 404);
-  }
-
-  const jobData = JSON.parse(job);
   const runId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
 
+  // Get job
+  const { results: jobResults } = await c.env.DB_V0.prepare(
+    'SELECT * FROM scheduled_jobs WHERE id = ?',
+  )
+    .bind(id)
+    .all();
+  if (!jobResults || jobResults.length === 0) {
+    return c.json({ success: false, error: 'Job not found' }, 404);
+  }
+
+  const job: any = jobResults[0];
+
   // Create run record
-  const runKey = `scheduler:run:${runId}`;
-  const run = {
-    id: runId,
-    jobId: id,
-    status: 'running',
-    startedAt,
-    completedAt: null,
-    duration: null,
-    success: null,
-    responseHash: null,
-    responseSize: null,
-    hasChanged: null,
-    changeType: null,
-    changeSummary: null,
-    diffPercentage: null,
-    error: null,
-    createdAt: startedAt,
-  };
-  await c.env.KV.put(runKey, JSON.stringify(run));
-
-  // Execute the crawl
   try {
-    // Call the read endpoint based on operation
-    let content = '';
-    let metadata = null;
+    await c.env.DB_V0.prepare(`
+      INSERT INTO job_runs (id, job_id, status, started_at, created_at)
+      VALUES (?, ?, 'running', ?, ?)
+    `)
+      .bind(runId, id, startedAt, startedAt)
+      .run();
+  } catch (e) {
+    console.error('Run insert error:', e);
+  }
 
-    const apiUrl =
-      c.env.DEEPCRAWL_API_URL ||
-      'https://deepcrawl-worker-v0-production.shinzero.workers.dev';
-    const apiKey = c.env.DEEPCRAWL_API_KEY || 'dc_dev_key_12345';
+  const orpcContext = await createSchedulerContext(c);
 
-    const endpoint = jobData.operation === 'markdown' ? '/markdown' : '/read';
-    const response = await fetch(`${apiUrl}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: jobData.url,
-        ...(jobData.operation === 'read' && { metadata: true }),
-      }),
-    });
-
-    const result = await response.json();
-
-    if (jobData.operation === 'markdown') {
-      content = result;
-    } else {
-      content = result.markdown || result.cleanedHtml || '';
-      metadata = result.metadata;
+  try {
+    let batchResult: any;
+    try {
+      batchResult = await processBatchRequest(orpcContext, {
+        items: [
+          {
+            id: '1',
+            url: job.url,
+            operation: { type: 'read', options: { metadata: true } },
+          },
+        ],
+        parallel: false,
+      });
+    } catch (procError: any) {
+      console.error(
+        '[SCHEDULER] processBatchRequest threw:',
+        procError?.message || procError,
+      );
+      throw procError;
     }
 
-    const newHash = simpleHash(content);
+    // Extract the actual read result from batch response
+    const readResult = batchResult?.results?.[0]?.data || null;
+
+    // Use metadata for change detection
+    const metadataJson = JSON.stringify(readResult?.metadata || {});
+    const newHash = simpleHash(metadataJson);
+
+    // Also try to get any available content
+    let content = '';
+    if (readResult?.markdown) {
+      content = readResult.markdown;
+    } else if (readResult?.cleanedHtml) {
+      content = readResult.cleanedHtml;
+    }
+
+    // If no content, use metadata as content for change detection
+    if (!content) {
+      content = metadataJson;
+    }
+
+    const completedAt = new Date().toISOString();
+    const duration =
+      new Date(completedAt).getTime() - new Date(startedAt).getTime();
 
     // Get previous snapshot
-    const snapshotsKey = `scheduler:snapshots:${id}`;
-    const snapshotsData = await c.env.KV.get(snapshotsKey);
-    const snapshots = snapshotsData ? JSON.parse(snapshotsData) : [];
-    const lastSnapshot = snapshots[0];
+    const { results: prevSnapshots } = await c.env.DB_V0.prepare(
+      'SELECT content FROM job_snapshots WHERE job_id = ? ORDER BY created_at DESC LIMIT 1',
+    )
+      .bind(id)
+      .all();
+
+    const lastContent = prevSnapshots[0]?.content as string | null;
 
     // Detect changes
     let hasChanged = false;
     let changeType = null;
     let diffPercentage = 0;
-    const summary = null;
 
-    if (jobData.enableChangeDetection && lastSnapshot) {
+    if (job.enable_change_detection === 1 && lastContent) {
       const changes = detectChanges(
-        lastSnapshot.content,
+        lastContent,
         content,
-        jobData.changeDetectionMode,
-        jobData.diffThreshold || 0,
+        job.change_detection_mode,
+        job.diff_threshold || 0,
       );
       hasChanged = changes.hasChanged;
       changeType = changes.changeType;
       diffPercentage = changes.diffPercentage;
+    } else if (!lastContent) {
+      hasChanged = true;
+      diffPercentage = 100;
     }
 
-    const completedAt = new Date().toISOString();
-
-    // Update run record
-    const updatedRun = {
-      ...run,
-      status: 'completed',
-      completedAt,
-      duration: new Date(completedAt).getTime() - new Date(startedAt).getTime(),
-      success: true,
-      responseHash: newHash,
-      responseSize: content.length,
-      hasChanged,
-      changeType,
-      diffPercentage,
-    };
-    await c.env.KV.put(runKey, JSON.stringify(updatedRun));
+    // Update run
+    await c.env.DB_V0.prepare(`
+      UPDATE job_runs SET status = 'completed', completed_at = ?, duration = ?,
+        success = 1, response_hash = ?, response_size = ?,
+        has_changed = ?, change_type = ?, diff_percentage = ?
+      WHERE id = ?
+    `)
+      .bind(
+        completedAt,
+        duration,
+        newHash,
+        content.length,
+        hasChanged ? 1 : 0,
+        changeType,
+        diffPercentage,
+        runId,
+      )
+      .run();
 
     // Save new snapshot
-    const newSnapshot = {
-      id: crypto.randomUUID(),
-      jobId: id,
-      runId,
-      content: content.substring(0, 100000), // Limit storage
-      contentHash: newHash,
-      metadata,
-      size: content.length,
-      createdAt: completedAt,
-    };
-
-    snapshots.unshift(newSnapshot);
-    // Keep only last 10 snapshots
-    if (snapshots.length > 10) {
-      snapshots.pop();
-    }
-    await c.env.KV.put(snapshotsKey, JSON.stringify(snapshots));
+    await c.env.DB_V0.prepare(`
+      INSERT INTO job_snapshots (id, job_id, run_id, content, content_hash, metadata, size, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+      .bind(
+        crypto.randomUUID(),
+        id,
+        runId,
+        content.substring(0, 100000),
+        newHash,
+        JSON.stringify(readResult?.metadata || {}),
+        content.length,
+        completedAt,
+      )
+      .run();
 
     // Update job stats
-    const updatedJob = {
-      ...jobData,
-      lastRunAt: completedAt,
-      nextRunAt: calculateNextRun(
-        jobData.scheduleType,
-        jobData.scheduleValue,
-        jobData.timezone,
-      ).toISOString(),
-      runCount: (jobData.runCount || 0) + 1,
-      updatedAt: completedAt,
-    };
-    await c.env.KV.put(jobKey, JSON.stringify(updatedJob));
+    await c.env.DB_V0.prepare(`
+      UPDATE scheduled_jobs SET 
+        last_run_at = ?, 
+        run_count = run_count + 1,
+        next_run_at = ?
+      WHERE id = ?
+    `)
+      .bind(
+        completedAt,
+        calculateNextRun(
+          job.schedule_type,
+          job.schedule_value,
+          job.timezone,
+        ).toISOString(),
+        id,
+      )
+      .run();
 
-    // Send webhook notification if enabled
-    if (jobData.webhookUrl && (hasChanged || !jobData.enableChangeDetection)) {
+    // Send webhook notification
+    if (job.webhook_url && hasChanged) {
       try {
-        await fetch(jobData.webhookUrl, {
+        await fetch(job.webhook_url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            event: hasChanged ? 'change_detected' : 'job_completed',
+            event: 'change_detected',
             timestamp: completedAt,
-            job: { id: jobData.id, name: jobData.name, url: jobData.url },
+            job: { id: job.id, name: job.name, url: job.url },
             run: {
               id: runId,
               status: 'completed',
@@ -451,46 +603,27 @@ scheduler.post('/jobs/:id/trigger', async (c) => {
 
     return c.json({
       success: true,
-      data: {
-        run: updatedRun,
-        hasChanged,
-        changeType,
-        diffPercentage,
-      },
+      data: { runId, hasChanged, changeType, diffPercentage },
     });
   } catch (error) {
     const completedAt = new Date().toISOString();
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error';
 
-    // Update run with error
-    const errorRun = {
-      ...run,
-      status: 'failed',
-      completedAt,
-      duration: new Date(completedAt).getTime() - new Date(startedAt).getTime(),
-      success: false,
-      error: { message: errorMessage },
-    };
-    await c.env.KV.put(runKey, JSON.stringify(errorRun));
+    await c.env.DB_V0.prepare(`
+      UPDATE job_runs SET status = 'failed', completed_at = ?, success = 0, error = ?
+      WHERE id = ?
+    `)
+      .bind(completedAt, JSON.stringify({ message: errorMessage }), runId)
+      .run();
 
-    // Update job error count
-    const errorJob = {
-      ...jobData,
-      errorCount: (jobData.errorCount || 0) + 1,
-      lastRunAt: completedAt,
-      updatedAt: completedAt,
-    };
-    await c.env.KV.put(jobKey, JSON.stringify(errorJob));
+    await c.env.DB_V0.prepare(`
+      UPDATE scheduled_jobs SET error_count = error_count + 1, last_run_at = ? WHERE id = ?
+    `)
+      .bind(completedAt, id)
+      .run();
 
-    return c.json(
-      {
-        success: false,
-        error: errorMessage,
-        run: errorRun,
-      },
-      500,
-    );
+    return c.json({ success: false, error: errorMessage }, 500);
   }
 });
 
@@ -500,29 +633,34 @@ scheduler.get('/jobs/:id/runs', async (c) => {
   const limit = Number.parseInt(c.req.query('limit') || '20');
   const offset = Number.parseInt(c.req.query('offset') || '0');
 
-  // List all runs for this job
-  const list = await c.env.KV.list({ prefix: 'scheduler:run:' });
-  let runs = await Promise.all(
-    list.keys
-      .filter((k) => k.name.includes(id))
-      .map(async (key) => {
-        const data = await c.env.KV.get(key.name);
-        return data ? JSON.parse(data) : null;
-      }),
-  );
+  try {
+    const { results } = await c.env.DB_V0.prepare(
+      'SELECT * FROM job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?',
+    )
+      .bind(id, limit, offset)
+      .all();
 
-  runs = runs
-    .filter(Boolean)
-    .sort(
-      (a, b) =>
-        new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
-    );
+    const runs = (results || []).map((row: any) => ({
+      id: row.id,
+      jobId: row.job_id,
+      status: row.status,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      duration: row.duration,
+      success: row.success === 1,
+      responseHash: row.response_hash,
+      responseSize: row.response_size,
+      hasChanged: row.has_changed === 1,
+      changeType: row.change_type,
+      diffPercentage: row.diff_percentage,
+      error: row.error ? JSON.parse(row.error) : null,
+      createdAt: row.created_at,
+    }));
 
-  return c.json({
-    success: true,
-    data: runs.slice(offset, offset + limit),
-    meta: { total: runs.length, limit, offset },
-  });
+    return c.json({ success: true, data: runs });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to get runs' }, 500);
+  }
 });
 
 // Get job snapshots
@@ -530,22 +668,32 @@ scheduler.get('/jobs/:id/snapshots', async (c) => {
   const id = c.req.param('id');
   const limit = Number.parseInt(c.req.query('limit') || '10');
 
-  const snapshotsKey = `scheduler:snapshots:${id}`;
-  const data = await c.env.KV.get(snapshotsKey);
-  const snapshots = data ? JSON.parse(data) : [];
+  try {
+    const { results } = await c.env.DB_V0.prepare(
+      'SELECT * FROM job_snapshots WHERE job_id = ? ORDER BY created_at DESC LIMIT ?',
+    )
+      .bind(id, limit)
+      .all();
 
-  return c.json({
-    success: true,
-    data: snapshots.slice(0, limit),
-  });
+    const snapshots = (results || []).map((row: any) => ({
+      id: row.id,
+      jobId: row.job_id,
+      runId: row.run_id,
+      contentHash: row.content_hash,
+      metadata: row.metadata ? JSON.parse(row.metadata) : null,
+      size: row.size,
+      createdAt: row.created_at,
+    }));
+
+    return c.json({ success: true, data: snapshots });
+  } catch (e) {
+    return c.json({ success: false, error: 'Failed to get snapshots' }, 500);
+  }
 });
 
-// Health check for scheduler
+// Health check
 scheduler.get('/health', async (c) => {
-  return c.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-  });
+  return c.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 export default scheduler;
