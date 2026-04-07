@@ -8,4 +8,5 @@ export const userQueryKeys = {
   listUserAccounts: ['user', 'list-user-accounts'] as const,
   apiKeys: ['user', 'api-keys'] as const,
   activityLogs: ['user', 'activity-logs'] as const,
+  scheduledJobs: ['user', 'scheduled-jobs'] as const,
 } as const;
