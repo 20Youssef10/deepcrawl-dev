@@ -92,3 +92,4 @@ tsconfig.tsbuildinfo
 .specify
 # next-agents-md
 .next-docs/
+.env.supabase
