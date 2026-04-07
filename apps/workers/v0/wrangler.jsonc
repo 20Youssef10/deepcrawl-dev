@@ -61,6 +61,10 @@
       "remote": true,
       "binding": "DEEPCRAWL_V0_READ_STORE",
       "id": "abcb1049c2934ae5ae47e62711cc5d23"
+    },
+    {
+      "binding": "KV",
+      "id": "crawler-data-kv"
     }
   ],
   "d1_databases": [

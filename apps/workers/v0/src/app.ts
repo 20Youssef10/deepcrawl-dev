@@ -8,6 +8,7 @@ import { rpcHandler } from '@/lib/orpc/rpc.handler';
 import { processBatchRequest } from '@/routers/batch/batch.processor';
 import { processJsonRequest } from '@/routers/json/json.processor';
 import { processPdfRequest } from '@/routers/pdf/pdf.processor';
+import schedulerRouter from '@/routers/scheduler';
 
 // Preload heavy modules during worker initialization to reduce cold start time
 import '@/services/scrape/scrape.service';
@@ -43,6 +44,9 @@ app.post('/batch', async (c) => {
   const result = await processBatchRequest(context, input);
   return c.json(result);
 });
+
+// Scheduler endpoints
+app.route('/scheduler', schedulerRouter);
 
 // Health check endpoint
 app.get('/health', async (c) => {
