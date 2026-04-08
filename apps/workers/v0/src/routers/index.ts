@@ -1,5 +1,4 @@
 import { publicProcedures } from '@/orpc';
-import { extractPOSTHandler } from './extract/extract.handler';
 import { linksGETHandler, linksPOSTHandler } from './links/links.handler';
 import {
   logsExportHandler,
@@ -7,7 +6,6 @@ import {
   logsPOSTHandler,
 } from './logs/logs.handler';
 import { readGETHandler, readPOSTHandler } from './read/read.handler';
-import { screenshotPOSTHandler } from './screenshot/screenshot.handler';
 
 export const router = publicProcedures.router({
   read: {
@@ -22,11 +20,5 @@ export const router = publicProcedures.router({
     getOne: logsGETHandler,
     listLogs: logsPOSTHandler,
     exportResponse: logsExportHandler,
-  },
-  screenshot: {
-    capture: screenshotPOSTHandler,
-  },
-  extract: {
-    elements: extractPOSTHandler,
   },
 });

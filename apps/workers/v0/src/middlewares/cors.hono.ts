@@ -45,7 +45,8 @@ export const CORS_OPTIONS = {
  * CORS middleware for public API access
  */
 export const deepCrawlCors = createMiddleware<AppBindings>(async (c, next) => {
-  const isDevelopment = c.env.WORKER_NODE_ENV === 'development';
+  const nodeEnv = c.env.WORKER_NODE_ENV as string;
+  const isDevelopment = nodeEnv === 'development';
   const appUrl = c.env.NEXT_PUBLIC_APP_URL;
   const requestOrigin = c.req.header('Origin');
 

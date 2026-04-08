@@ -48,7 +48,7 @@ export const CreateScheduledJobSchema = z.object({
   description: z.string().optional(),
   url: z.string().url(),
   operation: z.enum(OperationTypeEnum),
-  options: z.record(z.unknown()).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
 
   scheduleType: z.enum(ScheduleTypeEnum),
   scheduleValue: z.string().min(1),
@@ -84,7 +84,7 @@ export const ScheduledJobResponseSchema = z.object({
   description: z.string().nullable(),
   url: z.string(),
   operation: z.enum(OperationTypeEnum),
-  options: z.record(z.unknown()).nullable(),
+  options: z.record(z.string(), z.unknown()).nullable(),
 
   scheduleType: z.enum(ScheduleTypeEnum),
   scheduleValue: z.string(),
@@ -131,10 +131,10 @@ export const JobRunResponseSchema = z.object({
 
   hasChanged: z.boolean().nullable(),
   changeType: z.string().nullable(),
-  changeSummary: z.record(z.unknown()).nullable(),
+  changeSummary: z.record(z.string(), z.unknown()).nullable(),
   diffPercentage: z.number().nullable(),
 
-  error: z.record(z.unknown()).nullable(),
+  error: z.record(z.string(), z.unknown()).nullable(),
 
   createdAt: z.string(),
 });
@@ -151,7 +151,7 @@ export type ListJobRunsInput = z.infer<typeof ListJobRunsSchema>;
 export const ChangeSummarySchema = z.object({
   type: z.enum(['content', 'metadata', 'structure']),
   percentage: z.number(),
-  details: z.record(z.unknown()),
+  details: z.record(z.string(), z.unknown()),
   added: z.array(z.string()).optional(),
   removed: z.array(z.string()).optional(),
   modified: z.array(z.string()).optional(),
@@ -174,7 +174,7 @@ export const WebhookPayloadSchema = z.object({
     diffPercentage: z.number().nullable(),
   }),
   changes: ChangeSummarySchema.optional(),
-  error: z.record(z.unknown()).optional(),
+  error: z.record(z.string(), z.unknown()).optional(),
 });
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 
@@ -182,8 +182,8 @@ export const CalculateChangesSchema = z.object({
   jobId: z.string(),
   oldContent: z.string().optional(),
   newContent: z.string(),
-  oldMetadata: z.record(z.unknown()).optional(),
-  newMetadata: z.record(z.unknown()).optional(),
+  oldMetadata: z.record(z.string(), z.unknown()).optional(),
+  newMetadata: z.record(z.string(), z.unknown()).optional(),
   mode: z.enum(ChangeDetectionModeEnum),
   threshold: z.number().min(0).max(100).optional().default(0),
 });
@@ -222,7 +222,7 @@ export const JobSnapshotResponseSchema = z.object({
   jobId: z.string(),
   runId: z.string(),
   contentHash: z.string(),
-  metadata: z.record(z.unknown()).nullable(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
   size: z.number().nullable(),
   createdAt: z.string(),
 });

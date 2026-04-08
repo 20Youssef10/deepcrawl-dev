@@ -25,14 +25,14 @@ export async function processBatchRequest(
       if (item.operation.type === 'read') {
         data = await processReadRequest(c, {
           url: item.url,
-          ...item.operation.options,
+          ...(item.operation.options || {}),
         });
       } else if (item.operation.type === 'links') {
         data = await processLinksRequest(
           c,
           {
             url: item.url,
-            ...item.operation.options,
+            ...(item.operation.options || {}),
           },
           false,
         );

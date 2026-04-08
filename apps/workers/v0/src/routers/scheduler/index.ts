@@ -451,16 +451,21 @@ scheduler.post('/jobs/:id/trigger', async (c) => {
   try {
     let batchResult: any;
     try {
-      batchResult = await processBatchRequest(orpcContext, {
+      const batchOptions = {
         items: [
           {
             id: '1',
             url: job.url,
-            operation: { type: 'read', options: { metadata: true } },
+            operation: {
+              type: 'read' as const,
+              options: { markdown: false, cleanedHtml: false },
+            },
           },
         ],
         parallel: false,
-      });
+        maxConcurrency: 1,
+      };
+      batchResult = await processBatchRequest(orpcContext, batchOptions as any);
     } catch (procError: any) {
       console.error(
         '[SCHEDULER] processBatchRequest threw:',

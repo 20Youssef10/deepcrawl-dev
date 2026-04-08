@@ -4,7 +4,8 @@ import type { AppBindings } from '@/lib/context';
 
 export const connInfoMiddleware = createMiddleware<AppBindings>(
   async (c, next) => {
-    if (c.env.WORKER_NODE_ENV === 'development') {
+    const nodeEnv = c.env.WORKER_NODE_ENV as string;
+    if (nodeEnv === 'development') {
       c.set('userIP', c.env.API_URL ?? 'localhost');
     } else {
       const connInfo = getConnInfo(c);

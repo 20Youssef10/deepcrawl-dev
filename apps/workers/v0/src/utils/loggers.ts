@@ -1,14 +1,14 @@
 import { env as envWorker } from 'cloudflare:workers';
 
 export const logDebug = (...args: unknown[]) => {
-  const env = envWorker.WORKER_NODE_ENV;
+  const env = envWorker.WORKER_NODE_ENV as string | undefined;
   if (env === 'development') {
     console.log(...args);
   }
 };
 
 export const logWarn = (...args: unknown[]) => {
-  const env = envWorker.WORKER_NODE_ENV;
+  const env = envWorker.WORKER_NODE_ENV as string | undefined;
   if (env === 'development') {
     console.warn(...args);
   }

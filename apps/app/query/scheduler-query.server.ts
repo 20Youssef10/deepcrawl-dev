@@ -3,7 +3,10 @@
 import { headers } from 'next/headers';
 import { buildDeepcrawlHeaders } from '@/lib/auth-mode';
 
-const DEEPCRAWL_BASE_URL = process.env.NEXT_PUBLIC_DEEPCRAWL_API_URL as string;
+const DEEPCRAWL_BASE_URL =
+  process.env.DEEPCRAWL_API_URL ||
+  (process.env.NEXT_PUBLIC_DEEPCRAWL_API_URL as string) ||
+  'https://deepcrawl-worker-v0-production.shinzero.workers.dev';
 
 interface DcRequestOptions {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
