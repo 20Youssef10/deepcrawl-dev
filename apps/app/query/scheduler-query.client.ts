@@ -20,6 +20,16 @@ function resolveAppOrigin(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
   }
+
+  const envOrigin =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.NEXT_PUBLIC_VERCEL_URL ??
+    process.env.VERCEL_URL;
+
+  if (envOrigin && envOrigin.length > 0) {
+    return envOrigin.startsWith('http') ? envOrigin : `https://${envOrigin}`;
+  }
+
   return 'http://localhost:3000';
 }
 
